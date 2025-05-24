@@ -15,6 +15,7 @@ library(curatedBreastData)
 library(reshape2)
 library(splines)
 library(doParallel)
+library(randomForest)
 
 ### Sample datasets from curatedOvarianData
 # 
@@ -118,7 +119,7 @@ rlearner_m_hat_stack <- function(data, K, p, covariate_cols, k_folds, alpha, p_m
   }
   
   # Stacking
-  m_hat_k <- m_hat_k_pred_on_data <- m_hat_pred_stack_mat <- vector("list", length = K)
+  m_hat_k <- m_hat_k_pred_on_data <- m_hat_k_pred_on_data_k <- m_hat_pred_stack_mat <- vector("list", length = K)
   lambda_min <- vector()
   for(k in 1:K){
     # fold ID for cross-validation; balance treatment assignments
@@ -139,6 +140,8 @@ rlearner_m_hat_stack <- function(data, K, p, covariate_cols, k_folds, alpha, p_m
       #   m_hat_k_pred_on_data[[k]] = m_hat_k[[k]]$fit.preval[,!is.na(colSums(m_hat_k[[k]]$fit.preval))][, m_hat_k[[k]]$lambda[!is.na(colSums(m_hat_k[[k]]$fit.preval))] == 0]
       # }
       m_hat_k_pred_on_data[[k]] = predict(m_hat_k[[k]], newx = as.matrix(data[data$S <= K, covariate_cols]), s = 0)
+      # lambda_min[k] = m_hat_k[[k]]$lambda[which.min(m_hat_k[[k]]$cvm[!is.na(colSums(m_hat_k[[k]]$fit.preval))])]
+      # m_hat_k_pred_on_data[[k]] = predict(m_hat_k[[k]], newx = as.matrix(data[data$S <= K, covariate_cols]), s = lambda_min[k])
     }else if(length(covariate_cols) >= nrow(data)){
       # Fit cross-fitting LASSO 
       lambda_min[k] = m_hat_k[[k]]$lambda[which.min(m_hat_k[[k]]$cvm[!is.na(colSums(m_hat_k[[k]]$fit.preval))])]
@@ -481,3 +484,25 @@ ms_rlearner <- function(X, Y, alpha, K, p, p_mat, newX){
 }
 
 make_basis <- function(k, p) replace(numeric(p), k, 1)
+
+generate_tau_k <- function(X_row, k, offset_vec) {
+  X_perturbed <- X_row + offset_vec
+  (sin((2) * X_perturbed[1]) + log(abs(X_perturbed[2] * 1)) +
+    cos(X_perturbed[3]) * X_perturbed[4]^2)/33
+}
+
+generate_spline_basis <- function(X_df, df_spline = 3) {
+  spline_cols <- lapply(seq_along(X_df), function(j) {
+    col_j <- X_df[[j]]
+    if (length(unique(col_j)) < df_spline) {
+      # Reduce df if not enough unique values
+      df_effective <- max(1, length(unique(col_j)) - 1)
+    } else {
+      df_effective <- df_spline
+    }
+    bs(col_j, df = df_effective)
+  })
+  spline_mat <- do.call(cbind, spline_cols)
+  colnames(spline_mat) <- paste0("spline_", seq_len(ncol(spline_mat)))
+  return(as.matrix(spline_mat))
+}
